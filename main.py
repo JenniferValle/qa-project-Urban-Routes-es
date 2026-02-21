@@ -1,81 +1,60 @@
-import data
 from selenium import webdriver
-from selenium.webdriver import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.wait import WebDriverWait
-
-
-# no modificar
-def retrieve_phone_code(driver) -> str:
-    """Este código devuelve un número de confirmación de teléfono y lo devuelve como un string.
-    Utilízalo cuando la aplicación espere el código de confirmación para pasarlo a tus pruebas.
-    El código de confirmación del teléfono solo se puede obtener después de haberlo solicitado en la aplicación."""
-
-    import json
-    import time
-    from selenium.common import WebDriverException
-    code = None
-    for i in range(10):
-        try:
-            logs = [log["message"] for log in driver.get_log('performance') if log.get("message")
-                    and 'api/v1/number?number' in log.get("message")]
-            for log in reversed(logs):
-                message_data = json.loads(log)["message"]
-                body = driver.execute_cdp_cmd('Network.getResponseBody',
-                                              {'requestId': message_data["params"]["requestId"]})
-                code = ''.join([x for x in body['body'] if x.isdigit()])
-        except WebDriverException:
-            time.sleep(1)
-            continue
-        if not code:
-            raise Exception("No se encontró el código de confirmación del teléfono.\n"
-                            "Utiliza 'retrieve_phone_code' solo después de haber solicitado el código en tu aplicación.")
-        return code
-
-
-class UrbanRoutesPage:
-    from_field = (By.ID, 'from')
-    to_field = (By.ID, 'to')
-
-    def __init__(self, driver):
-        self.driver = driver
-
-    def set_from(self, from_address):
-        self.driver.find_element(*self.from_field).send_keys(from_address)
-
-    def set_to(self, to_address):
-        self.driver.find_element(*self.to_field).send_keys(to_address)
-
-    def get_from(self):
-        return self.driver.find_element(*self.from_field).get_property('value')
-
-    def get_to(self):
-        return self.driver.find_element(*self.to_field).get_property('value')
-
+import data
+from data import urban_routes_url, address_from, address_to, phone_number, card_number, card_cvv, message_for_driver
+from Dependencias import Dependencias
 
 
 class TestUrbanRoutes:
-
     driver = None
 
     @classmethod
     def setup_class(cls):
-        # no lo modifiques, ya que necesitamos un registro adicional habilitado para recuperar el código de confirmación del teléfono
-        from selenium.webdriver import DesiredCapabilities
-        capabilities = DesiredCapabilities.CHROME
-        capabilities["goog:loggingPrefs"] = {'performance': 'ALL'}
-        cls.driver = webdriver.Chrome(desired_capabilities=capabilities)
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_experimental_option("perfLoggingPrefs", {'enableNetwork': True, 'enablePage': True})
+        chrome_options.set_capability("goog:loggingPrefs", {'performance': 'ALL'})
+        cls.driver = webdriver.Chrome(options=chrome_options)
+        cls.driver.get(urban_routes_url)
+        cls.page = Dependencias(cls.driver)
 
-    def test_set_route(self):
-        self.driver.get(data.urban_routes_url)
-        routes_page = UrbanRoutesPage(self.driver)
-        address_from = data.address_from
-        address_to = data.address_to
-        routes_page.set_route(address_from, address_to)
-        assert routes_page.get_from() == address_from
-        assert routes_page.get_to() == address_to
+    def test_1_enter_addresses(self):
+        self.page.enter_addresses(address_from, address_to)
+        assert self.page.get_from_input_value() == address_from, "La dirección de origen no coincide"
+        assert self.page.get_to_input_value() == address_to, "La dirección de destino no coincide"
 
+    def test_2_select_comfort_tariff(self):
+        self.page.select_comfort_tariff()
+        assert self.page.is_comfort_tariff_selected(), "La tarifa Comfort no fue seleccionada correctamente"
+
+    def test_3_enter_phone_number(self):
+        self.page.enter_phone_number()
+        actual_number = data.phone_number
+        phone_number_written = self.page.is_phone_input_filled_correctly()
+        assert phone_number_written == actual_number
+        WebDriverWait(self.driver, timeout=5)
+
+    def test_4_add_credit_card(self):
+        self.page.add_credit_card(card_number, card_cvv)
+        assert self.page.is_card_linked(), "La tarjeta no fue vinculada correctamente"
+
+    def test_5_write_driver_message(self):
+        self.page.write_driver_message(message_for_driver)
+        assert self.page.is_message_sent(message_for_driver), "El mensaje no se ingresó correctamente"
+
+    def test_6_toggle_blanket_and_tissues(self):
+        self.page.toggle_blanket_and_tissues()
+        assert self.page.is_blanket_and_tissues_selected(), "La opción de manta y pañuelos no fue activada"
+
+    def test_7_add_ice_cream(self):
+        self.page.add_ice_cream()
+        assert self.page.is_ice_cream_added(), "No se agregaron 2 helados"
+
+    def test_8_taxi_seeker_appears(self):
+        self.page.confirm_trip()
+        assert self.page.is_taxi_modal(), "No apareció el modal para buscar un taxi"
+
+    def test_9_confirm_trip_and_check_driver(self):
+        assert self.page.wait_for_driver_info(), "La información del conductor no apareció"
 
     @classmethod
     def teardown_class(cls):
